@@ -1,0 +1,60 @@
+name: publish
+
+# A session pushes a branch upload/<utc-timestamp>-<n> holding incoming/{basin}/{YYYYMMDDHH}.zip
+# (see tools/publish_store.py in jkrek17/marine-research). This turns each zip into the asset
+# {basin}_{YYYYMMDDHH}.zip of release fields-{basin}-{YYYYMM}, then deletes the branch.
+on:
+  push:
+    branches: ['upload/**']
+
+permissions:
+  contents: write
+
+# Queue runs; never cancel one mid-upload. GitHub keeps only the newest *pending* run, so each run
+# handles every upload/* branch that exists when it gets to run (a skipped run's branch is picked up
+# by the next one).
+concurrency:
+  group: publish-releases
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Upload zips to releases and delete the branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin '+refs/heads/upload/*:refs/remotes/origin/upload/*' || true
+          branches=$(git for-each-ref --format='%(refname:strip=3)' 'refs/remotes/origin/upload/*' | sort)
+          echo "triggered by: ${GITHUB_REF_NAME:-?}; branches to process: ${branches:-none}"
+          for b in $branches; do
+            echo "::group::$b"
+            rm -rf stage && mkdir stage
+            git checkout -q --detach "origin/$b"
+            n=0
+            while IFS= read -r f; do
+              [[ "$f" =~ ^incoming/(natl|npac)/([0-9]{10})\.zip$ ]] || { echo "skip $f"; continue; }
+              basin="${BASH_REMATCH[1]}"; cycle="${BASH_REMATCH[2]}"
+              tag="fields-${basin}-${cycle:0:6}"
+              asset="${basin}_${cycle}.zip"
+              if ! gh release view "$tag" >/dev/null 2>&1; then
+                gh release create "$tag" --target main --latest=false \
+                  --title "Model fields, ${basin}, ${cycle:0:4}-${cycle:4:2}" \
+                  --notes "One zip per ${basin} cycle (${basin}_YYYYMMDDHH.zip), ZIP_STORED npz files in the layout of rk.store. See README.md."
+              fi
+              cp "$f" "stage/$asset"
+              gh release upload "$tag" "stage/$asset" --clobber
+              n=$((n+1))
+            done < <(git ls-tree -r --name-only HEAD -- incoming)
+            echo "uploaded $n asset(s) from $b"
+            git checkout -q --detach origin/main
+            git push origin --delete "$b"
+            echo "::endgroup::"
+          done
