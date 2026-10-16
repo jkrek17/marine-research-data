@@ -49,9 +49,25 @@ Never by hand and never to `main`. Two routes, both through `tools/publish_store
 
 ### Scheduled jobs
 
-Both clone jkrek17/marine-research without a token (it has to be public) and share the concurrency group `ecmwf-pull`, so only one heavy pull runs at a time.
+All three clone jkrek17/marine-research without a token (it has to be public). `fill.yml` and `truth.yml` share the concurrency group `ecmwf-pull`, so only one heavy pull runs at a time; `scores.yml` only reads the store and has its own group.
 
 - `fill.yml`, 10:15 and 22:15 UTC (and on demand: start, end, models, steps): GFS, GEFS, IFS, AIFS, ENS, AIFS ENS for the 00 and 12 UTC cycles of the last 14 days, steps 24-120, the 06/18 UTC-valid steps (30, 54, 78, 102, 126) and day 5-7 steps for gfs/ifs/aifs (36, 60, 84, 108, 132, 144, 156, 168). Already published cycles are not fetched again. An ensemble step is stored only with all its members, and cycles younger than 8 h are not tried, so a cycle whose ENS is still being posted is filled by the next run.
 - `truth.yml`, 04:00 UTC (and on demand): analyses, air-sea, obs, ASCAT and SMAP for days 3 to 16 back.
+- `scores.yml`, Mondays 06:00 UTC (and on demand: start, end as YYYYMMDD, kit_ref): the standing scores, see below.
 
 Limits to stay under: 2 GB per asset, 1000 assets per release. A cycle is about 10-15 MB, a fields release about 60 assets, a truth release at most about 124.
+
+### Standing scores
+
+`scores.yml` runs `tools/run_presets.py` of the kit (every `studies/*/preset.py`, which re-score a finished study's frozen method) on the newest 8 ISO weeks, ending at the most recent Sunday at least 3 days back (ASCAT lags about 2 days). Reads come from the releases above; nothing in them is changed. The history is built up, not recomputed: before publishing, the job downloads the published `standing_scores.csv` (a 404 means the first run; any other failure stops the job), drops its rows for the (study, week) pairs it has just scored, appends the new rows and sorts by study, week, basin, method, metric. `drift_flags.csv` and `preset_status.csv` come from the latest run only. A manual run with `start` and `end` (YYYYMMDD) does the same merge, so the history from 2025-11-01 can be filled in chunks of a few months; `kit_ref` picks the kit branch or tag. Limit 120 minutes; two runs never overlap. If a preset fails, the CSVs that were written are still published (the failed study keeps its older rows) and the job then fails.
+
+The results are the assets of one release, tag `scores`, replaced on every run:
+
+| Asset | Content |
+|---|---|
+| [`standing_scores.csv`](https://github.com/jkrek17/marine-research-data/releases/download/scores/standing_scores.csv) | all presets' rows: `study, week, basin, method, metric, value, n, truth` (one row per ISO week x basin x method x metric) |
+| [`drift_flags.csv`](https://github.com/jkrek17/marine-research-data/releases/download/scores/drift_flags.csv) | newest 4 weeks against the study's original interval: `ok`, `drift` or `insufficient` |
+| [`preset_status.csv`](https://github.com/jkrek17/marine-research-data/releases/download/scores/preset_status.csv) | per study: `ok` or `failed`, exit code, last error lines |
+| [`scores_meta.json`](https://github.com/jkrek17/marine-research-data/releases/download/scores/scores_meta.json) | generated time (UTC), kit commit, date range, `weeks_scored` (ISO weeks of the new rows), per-preset status |
+
+URL pattern: `https://github.com/jkrek17/marine-research-data/releases/download/scores/{asset}`. Inputs a preset cannot get from the store are reported in `preset_status.csv` and left out of the scores; they are not filled in.
