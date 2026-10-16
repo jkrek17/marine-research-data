@@ -1,9 +1,11 @@
 name: scores
 
 # Mondays at 06:00 UTC, re-run every study's standing-score preset (studies/*/preset.py in the kit, through
-# tools/run_presets.py) over the whole store, 2025-11-01 to the most recent Sunday at least 3 days back (ASCAT
-# lags about 2 days), and publish standing_scores.csv, drift_flags.csv, preset_status.csv and scores_meta.json
-# as assets of the release `scores` (replacing the previous ones). Reads come from the releases of this
+# tools/run_presets.py) over the newest 8 ISO weeks ending at the most recent Sunday at least 3 days back (ASCAT
+# lags about 2 days), merge the new rows into the published standing_scores.csv (rows of the weeks just scored
+# are replaced, older weeks kept) and publish standing_scores.csv, drift_flags.csv, preset_status.csv and
+# scores_meta.json as assets of the release `scores` (replacing the previous ones). A manual run with start and
+# end does the same merge, so the history from 2025-11 can be built in chunks of a few months. Reads come from the releases of this
 # repository (fields-*, truth-*), nothing is written to them. The kit (jkrek17/marine-research) must be public:
 # it is cloned without a token.
 #
@@ -14,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       start:
-        description: 'First cycle day, YYYYMMDD (default: 20251101)'
+        description: 'First cycle day, YYYYMMDD (default: the Monday 8 weeks before the end)'
         required: false
         default: ''
       end:
@@ -78,7 +80,6 @@ jobs:
           # import, and rk.store / rk.truth unpack release assets into RK_CACHE.
           export RK_CACHE="$RUNNER_TEMP/rk-cache" RK_DATA="$RUNNER_TEMP/rk-data"
           mkdir -p "$RK_CACHE" "$RK_DATA"
-          START="${INPUT_START:-20251101}"
           if [ -n "$INPUT_END" ]; then
             END="$INPUT_END"
           else
@@ -86,6 +87,8 @@ jobs:
             back3=$(date -u -d '3 days ago' +%Y-%m-%d)
             END=$(date -u -d "$back3 - $(( $(date -u -d "$back3" +%u) % 7 )) days" +%Y%m%d)
           fi
+          # default start: the Monday 55 days before the end Sunday = the newest 8 ISO weeks
+          START="${INPUT_START:-$(date -u -d "${END:0:4}-${END:4:2}-${END:6:2} - 55 days" +%Y%m%d)}"
           for v in "$START" "$END"; do
             [[ "$v" =~ ^[0-9]{8}$ ]] && date -u -d "$v" >/dev/null 2>&1 \
               || { echo "::error::bad date '$v' (want YYYYMMDD)"; exit 1; }
@@ -113,7 +116,39 @@ jobs:
           out="$RUNNER_TEMP/scores"
           mkdir -p "$out"
           KIT_SHA=$(git -C kit rev-parse HEAD)
+          # Merge into the published standing_scores.csv: its rows for the (study, week) pairs just scored
+          # are dropped, the new rows appended, sorted. A 404 means the first run; any other failure stops
+          # the job before anything is uploaded, so the history is never replaced by one run's rows.
+          url="https://github.com/jkrek17/marine-research-data/releases/download/scores/standing_scores.csv"
+          code=$(curl -sSL --retry 3 -o "$out/old_standing_scores.csv" -w '%{http_code}' "$url") || code=000
+          case "$code" in
+            200) export OLD_CSV="$out/old_standing_scores.csv" ;;
+            404) echo "no published standing_scores.csv yet (first run)"; export OLD_CSV="" ;;
+            *)   echo "::error::could not read the published standing_scores.csv (HTTP $code)"; exit 1 ;;
+          esac
           export OUT="$out" KIT_SHA KIT_REF START END RC
+          python3 - <<'PY'
+          import os
+          import pandas as pd
+          out, old = os.environ["OUT"], os.environ.get("OLD_CSV")
+          new_path = os.path.join(out, "standing_scores.csv")
+          if not os.path.exists(new_path):
+              print("::warning::no new standing_scores.csv; the published one is left as it is")
+          else:
+              new = pd.read_csv(new_path)
+              if old:
+                  prev = pd.read_csv(old)
+                  key = set(zip(new["study"], new["week"]))
+                  prev = prev[[k not in key for k in zip(prev["study"], prev["week"])]]
+                  merged = pd.concat([prev, new], ignore_index=True)
+              else:
+                  merged = new
+              merged = merged.sort_values(["study", "week", "basin", "method", "metric"], kind="mergesort")
+              merged.to_csv(new_path, index=False)
+              with open(os.path.join(out, "new_weeks.txt"), "w") as f:
+                  f.write("\n".join(sorted(new["week"].unique())))
+              print("standing_scores.csv: %d new rows, %d rows after merge" % (len(new), len(merged)))
+          PY
           python3 - <<'PY'
           import csv, datetime as dt, json, os
           out = os.environ["OUT"]
@@ -125,6 +160,12 @@ jobs:
           except FileNotFoundError:
               pass
           rc = os.environ.get("RC", "")
+          weeks = []
+          try:
+              with open(os.path.join(out, "new_weeks.txt")) as f:
+                  weeks = f.read().split()
+          except FileNotFoundError:
+              pass
           meta = {
               "generated_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "kit_repo": "jkrek17/marine-research",
@@ -132,6 +173,7 @@ jobs:
               "kit_sha": os.environ["KIT_SHA"],
               "start": os.environ.get("START") or None,
               "end": os.environ.get("END") or None,
+              "weeks_scored": weeks,
               "run_presets_exit": int(rc) if rc.isdigit() else None,
               "presets": presets,
           }
@@ -144,6 +186,7 @@ jobs:
           for n in standing_scores.csv drift_flags.csv preset_status.csv scores_meta.json; do
             [ -f "$out/$n" ] && files+=("$out/$n") || echo "::warning::$n was not written"
           done
+          rm -f "$out/old_standing_scores.csv" "$out/new_weeks.txt"
           if ! gh release view scores >/dev/null 2>&1; then
             gh release create scores --target main --latest=false \
               --title "Standing scores" \
@@ -151,7 +194,7 @@ jobs:
               || gh release view scores >/dev/null   # lost a race with another job: fine
           fi
           # replace the previous assets: --clobber overwrites by name; anything else left over is deleted
-          keep=" ${files[*]##*/} "
+          keep=" standing_scores.csv drift_flags.csv preset_status.csv scores_meta.json "   # never delete the history
           for old in $(gh release view scores --json assets --jq '.assets[].name'); do
             case "$keep" in *" $old "*) ;; *) gh release delete-asset scores "$old" --yes ;; esac
           done

@@ -59,7 +59,7 @@ Limits to stay under: 2 GB per asset, 1000 assets per release. A cycle is about 
 
 ### Standing scores
 
-`scores.yml` runs `tools/run_presets.py` of the kit (every `studies/*/preset.py`, which re-score a finished study's frozen method) over the whole store: 2025-11-01 to the most recent Sunday at least 3 days back (ASCAT lags about 2 days). Reads come from the releases above; nothing in them is changed. Limit 120 minutes; two runs never overlap. If a preset fails, the CSVs that were written are still published and the job then fails. `start`, `end` and `kit_ref` can be given on a manual run.
+`scores.yml` runs `tools/run_presets.py` of the kit (every `studies/*/preset.py`, which re-score a finished study's frozen method) on the newest 8 ISO weeks, ending at the most recent Sunday at least 3 days back (ASCAT lags about 2 days). Reads come from the releases above; nothing in them is changed. The history is built up, not recomputed: before publishing, the job downloads the published `standing_scores.csv` (a 404 means the first run; any other failure stops the job), drops its rows for the (study, week) pairs it has just scored, appends the new rows and sorts by study, week, basin, method, metric. `drift_flags.csv` and `preset_status.csv` come from the latest run only. A manual run with `start` and `end` (YYYYMMDD) does the same merge, so the history from 2025-11-01 can be filled in chunks of a few months; `kit_ref` picks the kit branch or tag. Limit 120 minutes; two runs never overlap. If a preset fails, the CSVs that were written are still published (the failed study keeps its older rows) and the job then fails.
 
 The results are the assets of one release, tag `scores`, replaced on every run:
 
@@ -68,6 +68,6 @@ The results are the assets of one release, tag `scores`, replaced on every run:
 | [`standing_scores.csv`](https://github.com/jkrek17/marine-research-data/releases/download/scores/standing_scores.csv) | all presets' rows: `study, week, basin, method, metric, value, n, truth` (one row per ISO week x basin x method x metric) |
 | [`drift_flags.csv`](https://github.com/jkrek17/marine-research-data/releases/download/scores/drift_flags.csv) | newest 4 weeks against the study's original interval: `ok`, `drift` or `insufficient` |
 | [`preset_status.csv`](https://github.com/jkrek17/marine-research-data/releases/download/scores/preset_status.csv) | per study: `ok` or `failed`, exit code, last error lines |
-| [`scores_meta.json`](https://github.com/jkrek17/marine-research-data/releases/download/scores/scores_meta.json) | generated time (UTC), kit commit, date range, per-preset status |
+| [`scores_meta.json`](https://github.com/jkrek17/marine-research-data/releases/download/scores/scores_meta.json) | generated time (UTC), kit commit, date range, `weeks_scored` (ISO weeks of the new rows), per-preset status |
 
 URL pattern: `https://github.com/jkrek17/marine-research-data/releases/download/scores/{asset}`. Inputs a preset cannot get from the store are reported in `preset_status.csv` and left out of the scores; they are not filled in.
