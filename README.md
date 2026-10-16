@@ -12,6 +12,20 @@ Model fields for the marine research kit (`rk/` in jkrek17/marine-research). The
   - other names added by studies, e.g. `gfs_low_f024.npz`; steps beyond f120 and 06/18 UTC steps (`f030`, `f054`, ...) use the same pattern
 - **Read URL** (public, no auth): `https://github.com/jkrek17/marine-research-data/releases/download/{tag}/{asset}`
 
+### Truth
+
+The kit's truth files (`rk.truth`, `rk.store.truth_*`) live in releases too, as plain npz assets, one per valid time or day:
+
+| Kind | Release tag | Asset | Contents |
+|---|---|---|---|
+| analysis | `truth-analysis-{basin}-{YYYYMM}` | `{YYYYMMDDHH}.npz` | GFS and IFS step-0 u, v, MSLP, mean speed, open-water mask |
+| obs | `truth-obs-{basin}-{YYYYMM}` | `{YYYYMMDDHH}.npz` | ship and buoy winds rebuilt from the GDAS marine csv |
+| airsea | `truth-airsea-{basin}-{YYYYMM}` | `{YYYYMMDDHH}.npz` | GFS 2 m air and skin temperature |
+| ascat | `truth-ascat-{YYYYMM}` | `{YYYYMMDD}.npz` | RSS ASCAT cells of the UTC day, both basins |
+| smap | `truth-smap-{YYYYMM}` | `{YYYYMMDD}.npz` | RSS SMAP L3 daily cells (`final` 1 FINAL, 0 NRT), both basins |
+
+The month is the month of the valid time or day. A release holds at most about 124 assets (4 valid times a day). Read URL: `https://github.com/jkrek17/marine-research-data/releases/download/{tag}/{asset}`. The OPC hurricane-force low fixes (hf-low CSVs) are not here: `rk.truth.hf_archive` reads them from the hf-low repo over HTTPS.
+
 ### Reading
 
 Normally through the kit: `rk.store.load_det / load_ens / load` check the local cache (`RK_CACHE`, default `~/.cache/marine-research`), then download and unpack the cycle's zip. By hand:
@@ -26,6 +40,18 @@ u, v, msl = d["u"], d["v"], d["msl"]
 
 ### Writing
 
-Never by hand and never to `main`. `tools/publish_store.py` in marine-research merges a cycle's new files with the published asset (so nothing another thread published is dropped), commits `incoming/{basin}/{YYYYMMDDHH}.zip` to a branch `upload/<utc-timestamp>-<n>` and pushes it. `.github/workflows/publish.yml` creates the release if it is missing, uploads each zip with `--clobber`, and deletes the branch. `.gitignore` blocks `*.npz` on main.
+Never by hand and never to `main`. Two routes, both through `tools/publish_store.py` in marine-research, which merges each file with what is already published (so nothing another thread published is dropped):
 
-Limits to stay under: 2 GB per asset, 1000 assets per release. A cycle is about 10-15 MB, a release about 60 assets.
+1. A session pushes a branch `upload/<utc-timestamp>-<n>` holding `incoming/{basin}/{YYYYMMDDHH}.zip` (fields) and `incoming/truth/{kind}/[{basin}/]{stem}.npz` (truth). `.github/workflows/publish.yml` uploads them with `scripts/upload_incoming.sh` and deletes the branch.
+2. The scheduled jobs write the same layout to a folder (`publish_store.py --direct`) and call `scripts/upload_incoming.sh` themselves, with the job's `GITHUB_TOKEN`.
+
+`scripts/upload_incoming.sh <folder>` is the one upload step: it creates a missing release, then uploads each file with `--clobber`. `.gitignore` blocks `*.npz` on main.
+
+### Scheduled jobs
+
+Both clone jkrek17/marine-research without a token (it has to be public) and share the concurrency group `ecmwf-pull`, so only one heavy pull runs at a time.
+
+- `fill.yml`, 10:15 and 22:15 UTC (and on demand: start, end, models, steps): GFS, GEFS, IFS, AIFS, ENS, AIFS ENS for the 00 and 12 UTC cycles of the last 14 days, steps 24-120, the 06/18 UTC-valid steps (30, 54, 78, 102, 126) and day 5-7 steps for gfs/ifs/aifs (36, 60, 84, 108, 132, 144, 156, 168). Already published cycles are not fetched again. An ensemble step is stored only with all its members, and cycles younger than 8 h are not tried, so a cycle whose ENS is still being posted is filled by the next run.
+- `truth.yml`, 04:00 UTC (and on demand): analyses, air-sea, obs, ASCAT and SMAP for days 3 to 16 back.
+
+Limits to stay under: 2 GB per asset, 1000 assets per release. A cycle is about 10-15 MB, a fields release about 60 assets, a truth release at most about 124.
