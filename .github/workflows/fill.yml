@@ -1,0 +1,115 @@
+name: fill
+
+# Twice a day, store GFS, GEFS, IFS, AIFS, ENS and AIFS ENS for the 00 and 12 UTC cycles of the last 14 days
+# (both basins) and upload them straight to the fields-{basin}-{YYYYMM} releases. Each run looks back
+# 14 days, so a skipped or failed run is made up by the next one; what is already published is not fetched
+# again. The kit (jkrek17/marine-research) must be public: it is cloned without a token.
+#
+# 10:15 and 22:15 UTC: the ensembles are complete about 8 h after the cycle, and both times are clear of the
+# marine wind page build windows (02:15, 08:15, 14:15, 20:15 for an hour) at the start.
+on:
+  schedule:
+    - cron: '15 10,22 * * *'
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 'First cycle day, YYYYMMDD (default: 14 days ago)'
+        required: false
+        default: ''
+      end:
+        description: 'Last cycle day, YYYYMMDD (default: today)'
+        required: false
+        default: ''
+      models:
+        description: 'Models: comma list of gfs,ifs,aifs,gefs,ens,aifs-ens or noaa / ecmwf (default: all six)'
+        required: false
+        default: ''
+      steps:
+        description: 'Forecast steps in hours, comma list (default: 24-120 every 24, the 06/18 UTC-valid steps, and day 5-7 for gfs/ifs/aifs)'
+        required: false
+        default: ''
+      kit_ref:
+        description: 'Branch or tag of jkrek17/marine-research to run (default: main)'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: write
+
+# One heavy ECMWF pull at a time (fill and truth share the group). Never cancel a running job.
+concurrency:
+  group: ecmwf-pull
+  cancel-in-progress: false
+
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GIT_TERMINAL_PROMPT: '0'
+      INPUT_START: ${{ inputs.start }}
+      INPUT_END: ${{ inputs.end }}
+      INPUT_MODELS: ${{ inputs.models }}
+      INPUT_STEPS: ${{ inputs.steps }}
+      KIT_REF: ${{ inputs.kit_ref || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: data
+      - name: Clone the kit (public, no token)
+        run: |
+          if ! git ls-remote --exit-code https://github.com/jkrek17/marine-research.git HEAD >/dev/null 2>&1; then
+            echo "::error title=marine-research is not public yet::jkrek17/marine-research cannot be read without a token. Make it public (design decision 1a) before this job can run."
+            exit 1
+          fi
+          git clone --quiet --depth 1 --branch "$KIT_REF" https://github.com/jkrek17/marine-research.git kit
+          git -C kit log -1 --format='kit %H %s'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the kit's requirements
+        run: |
+          # requirements.txt pins nwp from jkrek17/awips-tools; check it is readable without a token
+          if ! git ls-remote --exit-code https://github.com/jkrek17/awips-tools.git HEAD >/dev/null 2>&1; then
+            echo "::error title=awips-tools is not public::kit/requirements.txt installs nwp from jkrek17/awips-tools, which cannot be read without a token."
+            exit 1
+          fi
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet -r kit/requirements.txt eccodes
+          python -c "import eccodes, nwp; print('eccodes', eccodes.__version__)"
+      - name: Catch-up fill (last 14 days of 00/12 UTC cycles)
+        id: fill
+        timeout-minutes: 290
+        run: |
+          set -euo pipefail
+          export RK_CACHE="$RUNNER_TEMP/rk-cache" RK_DATA="$RUNNER_TEMP/rk-data"
+          START="${INPUT_START:-$(date -u -d '14 days ago' +%Y%m%d)}"
+          END="${INPUT_END:-$(date -u +%Y%m%d)}"
+          ALL=gfs,ifs,aifs,gefs,ens,aifs-ens
+          MODELS="${INPUT_MODELS:-$ALL}"
+          # --complete: an ensemble step is stored only with all its members, so a cycle whose ENS is still
+          # being posted is skipped now and filled by the next run (nothing short is published as done).
+          # --min-age-hours 8: cycles younger than 8 h are not tried (ENS is complete about 8 h after).
+          common=(--start "$START" --end "$END" --hours 0,12 --workers 6 --complete --min-age-hours 8)
+          if [ -n "$INPUT_STEPS" ]; then
+            python kit/tools/fill_store.py "${common[@]}" --models "$MODELS" --steps "$INPUT_STEPS"
+          else
+            # default steps, plus the 06/18 UTC-valid steps
+            python kit/tools/fill_store.py "${common[@]}" --models "$MODELS" --steps 24,30,48,54,72,78,96,102,120,126
+            # day 5-7 steps, deterministic models only (analyses were handled by the pass above)
+            if [ "$MODELS" = "$ALL" ]; then
+              python kit/tools/fill_store.py "${common[@]}" --models gfs,ifs,aifs --no-analysis \
+                --steps 36,60,84,108,132,144,156,168
+            else
+              echo "custom models: day 5-7 pass skipped (give steps to choose them)"
+            fi
+          fi
+      - name: Publish to the releases
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          export RK_CACHE="$RUNNER_TEMP/rk-cache" RK_DATA="$RUNNER_TEMP/rk-data"
+          # merge each cycle with its published asset, write the incoming/ layout, upload with --clobber
+          python kit/tools/publish_store.py --direct "$RUNNER_TEMP/incoming" --what all
+          bash data/scripts/upload_incoming.sh "$RUNNER_TEMP/incoming"

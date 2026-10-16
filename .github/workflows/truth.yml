@@ -1,0 +1,84 @@
+name: truth
+
+# Daily at 04:00 UTC, add the truth for days 3 to 16 back to the truth-* releases: GFS/IFS analyses and air-sea
+# temperature difference, ship and buoy winds (GDAS), ASCAT and SMAP days (RSS). ASCAT and SMAP lag about
+# 2 days, hence 3. Each run covers the whole window, so a missed run is made up; what is already published is
+# not built again. The kit (jkrek17/marine-research) must be public: it is cloned without a token.
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      back_from:
+        description: 'Oldest day, days before today (default 16)'
+        required: false
+        default: '16'
+      back_to:
+        description: 'Newest day, days before today (default 3)'
+        required: false
+        default: '3'
+      kinds:
+        description: 'Kinds: comma list of analysis,airsea,obs,ascat,smap (default all)'
+        required: false
+        default: 'analysis,airsea,obs,ascat,smap'
+      kit_ref:
+        description: 'Branch or tag of jkrek17/marine-research to run (default: main)'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: write
+
+# Shares the group with fill.yml: the analyses stream IFS and GFS step 0, one heavy pull at a time.
+concurrency:
+  group: ecmwf-pull
+  cancel-in-progress: false
+
+jobs:
+  truth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GIT_TERMINAL_PROMPT: '0'
+      BACK_FROM: ${{ inputs.back_from || '16' }}
+      BACK_TO: ${{ inputs.back_to || '3' }}
+      KINDS: ${{ inputs.kinds || 'analysis,airsea,obs,ascat,smap' }}
+      KIT_REF: ${{ inputs.kit_ref || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: data
+      - name: Clone the kit (public, no token)
+        run: |
+          if ! git ls-remote --exit-code https://github.com/jkrek17/marine-research.git HEAD >/dev/null 2>&1; then
+            echo "::error title=marine-research is not public yet::jkrek17/marine-research cannot be read without a token. Make it public (design decision 1a) before this job can run."
+            exit 1
+          fi
+          git clone --quiet --depth 1 --branch "$KIT_REF" https://github.com/jkrek17/marine-research.git kit
+          git -C kit log -1 --format='kit %H %s'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the kit's requirements
+        run: |
+          if ! git ls-remote --exit-code https://github.com/jkrek17/awips-tools.git HEAD >/dev/null 2>&1; then
+            echo "::error title=awips-tools is not public::kit/requirements.txt installs nwp from jkrek17/awips-tools, which cannot be read without a token."
+            exit 1
+          fi
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet -r kit/requirements.txt eccodes
+          python -c "import eccodes, nwp, netCDF4; print('eccodes', eccodes.__version__)"
+      - name: Build the missing truth files
+        timeout-minutes: 140
+        run: |
+          set -euo pipefail
+          export RK_CACHE="$RUNNER_TEMP/rk-cache" RK_DATA="$RUNNER_TEMP/rk-data"
+          python kit/tools/fill_truth.py --back-from "$BACK_FROM" --back-to "$BACK_TO" --kinds "$KINDS"
+      - name: Publish to the releases
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          export RK_CACHE="$RUNNER_TEMP/rk-cache" RK_DATA="$RUNNER_TEMP/rk-data"
+          python kit/tools/publish_store.py --direct "$RUNNER_TEMP/incoming" --what truth
+          bash data/scripts/upload_incoming.sh "$RUNNER_TEMP/incoming"
