@@ -43,6 +43,7 @@ jobs:
     timeout-minutes: 120
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}   # gh runs outside the checkout
       GIT_TERMINAL_PROMPT: '0'
       INPUT_START: ${{ inputs.start }}
       INPUT_END: ${{ inputs.end }}
@@ -100,8 +101,8 @@ jobs:
           echo "end=$E" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/scores"
           # exit 1 means a preset failed; the CSVs that were written are still published, then the job fails
-          python kit/tools/run_presets.py --start "$S" --end "$E" --out-dir "$RUNNER_TEMP/scores"
-          rc=$?
+          rc=0   # the step shell runs with -e, so catch the exit code explicitly
+          python kit/tools/run_presets.py --start "$S" --end "$E" --out-dir "$RUNNER_TEMP/scores" || rc=$?
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           echo "run_presets exit code $rc"
           exit 0
