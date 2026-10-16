@@ -1,0 +1,2 @@
+# Model fields live in GitHub Releases, never on main.
+*.npz
