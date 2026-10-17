@@ -7,7 +7,7 @@
 # <folder> holds, relative to itself:
 #   {natl,npac}/{YYYYMMDDHH}.zip                       -> release fields-{basin}-{YYYYMM},
 #                                                          asset {basin}_{YYYYMMDDHH}.zip
-#   truth/{analysis,obs,airsea,gridsat}/{natl,npac}/{YYYYMMDDHH}.npz
+#   truth/{analysis,obs,airsea,gridsat,airmass}/{natl,npac}/{YYYYMMDDHH}.npz
 #                                                       -> release truth-{kind}-{basin}-{YYYYMM}, asset {YYYYMMDDHH}.npz
 #   truth/{ascat,smap}/{YYYYMMDD}.npz                  -> release truth-{kind}-{YYYYMM}, asset {YYYYMMDD}.npz
 # Anything else is reported and skipped. Missing releases are created. Assets are uploaded with --clobber
@@ -31,7 +31,7 @@ while IFS= read -r f; do
     tag="fields-${b}-${s:0:6}"; asset="${b}_${s}.zip"
     title[$tag]="Model fields, ${b}, ${s:0:4}-${s:4:2}"
     note[$tag]="One zip per ${b} cycle (${b}_YYYYMMDDHH.zip), ZIP_STORED npz files in the layout of rk.store. See README.md."
-  elif [[ "$rel" =~ ^truth/(analysis|obs|airsea|gridsat)/(natl|npac)/([0-9]{10})\.npz$ ]]; then
+  elif [[ "$rel" =~ ^truth/(analysis|obs|airsea|gridsat|airmass)/(natl|npac)/([0-9]{10})\.npz$ ]]; then
     k="${BASH_REMATCH[1]}"; b="${BASH_REMATCH[2]}"; s="${BASH_REMATCH[3]}"
     tag="truth-${k}-${b}-${s:0:6}"; asset="${s}.npz"
     title[$tag]="Truth ${k}, ${b}, ${s:0:4}-${s:4:2}"
