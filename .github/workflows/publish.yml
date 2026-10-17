@@ -3,7 +3,7 @@ name: publish
 # A session pushes a branch upload/<utc-timestamp>-<n> holding incoming/ (see tools/publish_store.py in
 # jkrek17/marine-research):
 #   incoming/{basin}/{YYYYMMDDHH}.zip                                 model fields
-#   incoming/truth/{analysis,obs,airsea,gridsat}/{basin}/{YYYYMMDDHH}.npz truth, one file per valid time
+#   incoming/truth/{analysis,obs,airsea,gridsat,airmass}/{basin}/{YYYYMMDDHH}.npz truth, one file per valid time
 #   incoming/truth/{ascat,smap}/{YYYYMMDD}.npz                        truth, one file per day
 # scripts/upload_incoming.sh turns each into a release asset (fields-{basin}-{YYYYMM}, truth-{kind}[-{basin}]-{YYYYMM}),
 # then this workflow deletes the branch.

@@ -24,6 +24,7 @@ The kit's truth files (`rk.truth`, `rk.store.truth_*`) live in releases too, as 
 | ascat | `truth-ascat-{YYYYMM}` | `{YYYYMMDD}.npz` | RSS ASCAT cells of the UTC day, both basins |
 | smap | `truth-smap-{YYYYMM}` | `{YYYYMMDD}.npz` | RSS SMAP L3 daily cells (`final` 1 FINAL, 0 NRT), both basins |
 | gridsat | `truth-gridsat-{basin}-{YYYYMM}` | `{YYYYMMDDHH}.npz` | GridSat-B1 11 um IR brightness temperature over the basin box with margins (`rk.satellite.box`), int16, 00/06/12/18 UTC |
+| airmass | `truth-airmass-{basin}-{YYYYMM}` | `{YYYYMMDDHH}.npz` | GOES ABI bands 8, 10, 12, 13 (air-mass RGB inputs) over the basin box with margins (`rk.satellite.airmass_box`), int16, 00/06/12/18 UTC |
 
 The month is the month of the valid time or day. A release holds at most about 124 assets (4 valid times a day). Read URL: `https://github.com/jkrek17/marine-research-data/releases/download/{tag}/{asset}`. The OPC hurricane-force low fixes (hf-low CSVs) are not here: `rk.truth.hf_archive` reads them from the hf-low repo over HTTPS.
 
