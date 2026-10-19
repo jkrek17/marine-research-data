@@ -28,6 +28,16 @@ The kit's truth files (`rk.truth`, `rk.store.truth_*`) live in releases too, as 
 
 The month is the month of the valid time or day. A release holds at most about 124 assets (4 valid times a day). Read URL: `https://github.com/jkrek17/marine-research-data/releases/download/{tag}/{asset}`. The OPC hurricane-force low fixes (hf-low CSVs) are not here: `rk.truth.hf_archive` reads them from the hf-low repo over HTTPS.
 
+### Lab inputs
+
+Release `lab-assets` holds the fixed inputs of the wxmap.pro lab job (`rk.store.lab_asset(name)` in the kit), one npz per name, replaced in place when rebuilt:
+
+| Asset | Contents |
+|---|---|
+| `twins_library.npz` | Storm Twins library: 32,288 ERA5 pipeline A fixes (a proxy), Oct-Apr 2014-15..2021-22, 15 pattern components and gust class each |
+| `twins_clim0012.npz` | WeatherBench2 1990-2019 climatology of z500, MSLP, u250, v250 at 00 and 12 UTC on the 1.5 degree grid (float16) |
+| `twins_pca.npz` | the frozen scaler, mask and 15-component PCA (hf-low `storm_patch_analogs/gfs/results/frozen_pca_full.npz`) |
+
 ### Reading
 
 Normally through the kit: `rk.store.load_det / load_ens / load` check the local cache (`RK_CACHE`, default `~/.cache/marine-research`), then download and unpack the cycle's zip. By hand:
