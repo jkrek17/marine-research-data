@@ -10,6 +10,8 @@
 #   truth/{analysis,obs,airsea,gridsat,airmass}/{natl,npac}/{YYYYMMDDHH}.npz
 #                                                       -> release truth-{kind}-{basin}-{YYYYMM}, asset {YYYYMMDDHH}.npz
 #   truth/{ascat,smap}/{YYYYMMDD}.npz                  -> release truth-{kind}-{YYYYMM}, asset {YYYYMMDD}.npz
+#   lab/{name}.npz                                     -> release lab-assets, asset {name}.npz (the lab job's
+#                                                          fixed inputs, rk.store.lab_asset)
 # Anything else is reported and skipped. Missing releases are created. Assets are uploaded with --clobber
 # (the producer, tools/publish_store.py, has already merged each file with the published asset).
 # Needs the gh CLI and GH_TOKEN; the repository is GITHUB_REPOSITORY, else the current git remote.
@@ -41,6 +43,10 @@ while IFS= read -r f; do
     tag="truth-${k}-${s:0:6}"; asset="${s}.npz"
     title[$tag]="Truth ${k}, ${s:0:4}-${s:4:2}"
     note[$tag]="One npz per UTC day (YYYYMMDD.npz), both basins: truth kind ${k}. See README.md."
+  elif [[ "$rel" =~ ^lab/([A-Za-z0-9][A-Za-z0-9_.-]*\.npz)$ ]]; then
+    tag="lab-assets"; asset="${BASH_REMATCH[1]}"
+    title[$tag]="Lab job inputs"
+    note[$tag]="Fixed inputs of the wxmap.pro lab job (rk.store.lab_asset in jkrek17/marine-research), e.g. the Storm Twins library. See README.md."
   else
     echo "skip $rel"
     continue
