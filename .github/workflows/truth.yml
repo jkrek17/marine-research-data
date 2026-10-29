@@ -18,9 +18,9 @@ on:
         required: false
         default: '3'
       kinds:
-        description: 'Kinds: comma list of analysis,airsea,obs,ascat,smap (default all)'
+        description: 'Kinds: comma list of analysis,airsea,obs,ascat,smap,oscat,uhr (default all)'
         required: false
-        default: 'analysis,airsea,obs,ascat,smap'
+        default: 'analysis,airsea,obs,ascat,smap,oscat,uhr'
       kit_ref:
         description: 'Branch or tag of jkrek17/marine-research to run (default: main)'
         required: false
@@ -43,7 +43,7 @@ jobs:
       GIT_TERMINAL_PROMPT: '0'
       BACK_FROM: ${{ inputs.back_from || '16' }}
       BACK_TO: ${{ inputs.back_to || '3' }}
-      KINDS: ${{ inputs.kinds || 'analysis,airsea,obs,ascat,smap' }}
+      KINDS: ${{ inputs.kinds || 'analysis,airsea,obs,ascat,smap,oscat,uhr' }}
       KIT_REF: ${{ inputs.kit_ref || 'main' }}
     steps:
       - uses: actions/checkout@v4
